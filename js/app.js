@@ -250,12 +250,19 @@
         <div>${esc(x.detalle)}</div>${x.accion ? `<div class="fa">➜ ${esc(x.accion)}</div>` : ''}</div>`).join('') + '</div>';
   }
 
-  $('btnInforme').onclick = () => {
+  $('btnInforme').onclick = async () => {
     const r = state.res; if (!r) return;
-    const wb = C.informeLibro(XLSX, r);
     const per = (r.periodo || '').replace(/[^\w-]+/g, '_');
     const emp = C.norm(r.empresa).replace(/ /g, '_').slice(0, 40);
-    XLSX.writeFile(wb, `Conciliacion_${emp}_${per}.xlsx`);
+    const nombre = `Conciliacion_${emp}_${per}.xlsx`;
+    const btn = $('btnInforme'); btn.disabled = true; btn.textContent = 'Generando…';
+    try {
+      if (window.ExcelJS && window.Informe) await window.Informe.descargar(window.ExcelJS, r, C, nombre);
+      else XLSX.writeFile(C.informeLibro(XLSX, r), nombre); // respaldo sin formato
+    } catch (e) {
+      mensaje('err', 'No se pudo generar el informe con formato (' + e.message + '). Se descarga la versión simple.');
+      XLSX.writeFile(C.informeLibro(XLSX, r), nombre);
+    } finally { btn.disabled = false; btn.textContent = 'Descargar informe Excel'; }
   };
 
   // ------------------------------------------------------------ inicio
