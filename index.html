@@ -167,7 +167,10 @@ footer{color:var(--muted);font-size:12px;margin-top:30px;text-align:center}
       <label>Por trabajador y subsistema: $ <input type="number" id="tolT" value="1000" min="0" step="100"></label>
       <label>Por entidad (total): $ <input type="number" id="tolE" value="5000" min="0" step="500"></label>
     </details>
-    <button class="btn primary" id="btnRun" disabled>Conciliar</button>
+    <div class="row">
+      <button class="btn btn-nueva hidden" id="btnNueva1" title="Quita los archivos y el resultado para empezar otra conciliación (el catálogo se conserva)">↺ Nueva conciliación</button>
+      <button class="btn primary" id="btnRun" disabled>Conciliar</button>
+    </div>
   </div>
   <div id="mensajes"></div>
 
@@ -177,12 +180,18 @@ footer{color:var(--muted);font-size:12px;margin-top:30px;text-align:center}
         <h2 id="resTitulo"></h2>
         <div class="sub" id="resSub"></div>
       </div>
-      <button class="btn primary" id="btnInforme">Descargar informe Excel</button>
+      <div class="row">
+        <button class="btn btn-nueva" id="btnNueva2" title="Quita los archivos y el resultado para empezar otra conciliación (el catálogo se conserva)">↺ Nueva conciliación</button>
+        <button class="btn primary" id="btnInforme">Descargar informe Excel</button>
+      </div>
     </div>
     <div class="kpis" id="kpis"></div>
     <div id="avisos"></div>
     <div class="tabs" role="tablist" id="tabs"></div>
     <div id="panel"></div>
+    <div class="actions" style="justify-content:flex-end">
+      <button class="btn btn-nueva" id="btnNueva3" title="Quita los archivos y el resultado para empezar otra conciliación (el catálogo se conserva)">↺ Nueva conciliación</button>
+    </div>
   </section>
 
   <footer>Versión 1 · Los datos se procesan localmente en el navegador · Guarda el informe en la carpeta del mes en Teams</footer>
@@ -190,8 +199,8 @@ footer{color:var(--muted);font-size:12px;margin-top:30px;text-align:center}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-<script src="js/engine.js?v=2026-11-23b"></script>
-<script src="js/informe.js?v=2026-11-23b"></script>
-<script src="js/app.js?v=2026-11-23b"></script>
+<script src="js/engine.js?v=2026-11-23c"></script>
+<script src="js/informe.js?v=2026-11-23c"></script>
+<script src="js/app.js?v=2026-11-23c"></script>
 </body>
 </html>

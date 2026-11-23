@@ -230,6 +230,7 @@
     const ok = state.archivos.filter(a => a.data);
     $('btnRun').disabled = !(ok.some(a => a.data.tipo === 'planilla') && ok.some(a => a.data.tipo !== 'planilla'));
     $('btnExtraer').disabled = !ok.some(a => a.data.tipo === 'planilla');
+    $('btnNueva1').classList.toggle('hidden', !(state.archivos.length || state.res));
     if (state.verDetectados) pintarDetectados();
   }
   $('lista').addEventListener('click', e => {
@@ -244,6 +245,7 @@
 
   // ------------------------------------------------------------ conciliar
   $('btnRun').onclick = () => {
+    $('mensajes').innerHTML = '';
     try {
       const archivos = state.archivos.filter(a => a.data).map(a => a.data);
       state.res = C.conciliar(archivos, state.catalogo, { tolTrabajador: +$('tolT').value || 0, tolEntidad: +$('tolE').value || 0 });
@@ -338,7 +340,24 @@
     } finally { btn.disabled = false; btn.textContent = 'Descargar informe Excel'; }
   };
 
+  // ------------------------------------------------------------ nueva conciliación
+  // Quita archivos, resultado y mensajes; conserva el catálogo y las tolerancias.
+  function nuevaConciliacion(preguntar) {
+    if (preguntar && !confirm('¿Empezar una nueva conciliación?\n\nSe quitarán los archivos cargados y el resultado actual. El catálogo se conserva.\nSi necesitas el informe, descárgalo antes.')) return;
+    state.archivos = []; state.res = null; state.tab = 'dif'; state.filtro = '';
+    state.verDetectados = false; state.estructura = null;
+    $('resultado').classList.add('hidden');
+    ['kpis', 'avisos', 'tabs', 'panel', 'mensajes'].forEach(id => { $(id).innerHTML = ''; });
+    $('resTitulo').textContent = ''; $('resSub').textContent = '';
+    pintarDetectados(); pintarLista();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    mensaje('info', 'Listo para una nueva conciliación: cargue los archivos del paso 2.');
+  }
+  $('btnNueva1').onclick = () => nuevaConciliacion(true);
+  $('btnNueva2').onclick = () => nuevaConciliacion(true);
+  $('btnNueva3').onclick = () => nuevaConciliacion(true);
+
   // ------------------------------------------------------------ inicio
   cargarCatGuardado(); pintarCat(); pintarLista();
-  window.App = { manejarArchivos, leerCat, state };
+  window.App = { manejarArchivos, leerCat, nuevaConciliacion, state };
 })();
