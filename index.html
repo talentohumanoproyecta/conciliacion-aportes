@@ -105,6 +105,7 @@ tr:last-child td{border-bottom:none}
 .toolbar input[type=text]{flex:1;min-width:180px}
 .empty{color:var(--muted);text-align:center;padding:24px}
 .cat-tbl input,.cat-tbl select{width:100%;min-width:70px;padding:4px 6px}
+.cat-tbl input[type=text]{min-width:170px}
 footer{color:var(--muted);font-size:12px;margin-top:30px;text-align:center}
 .hidden{display:none!important}
 </style>
@@ -122,11 +123,12 @@ footer{color:var(--muted);font-size:12px;margin-top:30px;text-align:center}
   <div class="grid">
     <section class="card" id="cardCatalogo">
       <h2><span class="step">1</span> Catálogo de centros de trabajo</h2>
-      <p class="hint">Excel con empresas, centros y clase de riesgo (está en la carpeta <b>Catalogo</b> del equipo de Teams). Se recuerda en este navegador.</p>
+      <p class="hint">Excel con razón social, sucursales, centros de trabajo y clase de riesgo (carpeta <b>Catalogo</b> del equipo de Teams). Se recuerda en este navegador.</p>
       <div id="catEstado" class="status"></div>
       <div class="row" style="margin-top:10px">
         <button class="btn" id="btnCat">Cargar catálogo</button>
         <button class="btn" id="btnCatEditar">Ver / editar centros</button>
+        <button class="btn" id="btnExtraer" disabled title="Cargue primero una o varias planillas en el paso 2">Extraer centros de las planillas</button>
         <input type="file" id="fileCat" accept=".xlsx,.xls" hidden>
       </div>
     </section>
@@ -154,6 +156,8 @@ footer{color:var(--muted);font-size:12px;margin-top:30px;text-align:center}
         <button class="btn small" id="btnCerrarCat">Cerrar</button>
       </div>
     </div>
+    <div id="detectados" class="hidden" style="margin-bottom:16px"></div>
+    <h3 style="font-size:13px;margin:6px 0;color:var(--muted)">Centros en el catálogo</h3>
     <div class="tbl-wrap"><table class="cat-tbl" id="tblCat"></table></div>
   </section>
 

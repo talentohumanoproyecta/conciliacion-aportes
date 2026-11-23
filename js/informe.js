@@ -343,13 +343,13 @@
     // ================================================================ CENTROS NUEVOS
     if (res.centrosNuevos.length) {
       const wc = wb.addWorksheet('Centros nuevos', { properties: { tabColor: { argb: COL.amber } } });
-      const colsC = [['Empresa', 40], ['Nombre en planilla', 26], ['Código centro', 14], ['Riesgo que liquida la planilla', 16], ['Trabajadores', 13]];
+      const colsC = [['Razón social', 40], ['Sucursal', 30], ['Centro de trabajo', 26], ['Riesgo que liquida la planilla', 16], ['Trabajadores', 13]];
       wc.columns = colsC.map(([, width]) => ({ width }));
       titulo(wc, 'Centros de trabajo que no están en el catálogo', 'Agréguelos desde el aplicativo (pestaña Centros nuevos) y suba el catálogo actualizado a Teams.', colsC.length);
       const hc = wc.getRow(3); colsC.forEach(([h], i) => { hc.getCell(i + 1).value = h; }); encabezado(hc);
       res.centrosNuevos.forEach((c, i) => {
         const row = wc.getRow(4 + i);
-        [c.empresa, c.nombrePlanilla, c.codigo, c.riesgoObservado ? 'Riesgo ' + c.riesgoObservado : '', c.trabajadores].forEach((v, j) => { row.getCell(j + 1).value = v; });
+        [c.razon, c.sucursal, c.centro, c.riesgoObservado ? 'Riesgo ' + c.riesgoObservado : '', c.trabajadores].forEach((v, j) => { row.getCell(j + 1).value = v; });
         bordes(row, 1, colsC.length);
       });
     }

@@ -11,13 +11,23 @@
   const money = v => (v === undefined || v === null || v === '') ? '' : C.money(v);
 
   // ------------------------------------------------------------ catálogo
+  // Estructura: Razón social > Sucursal principal > Sucursal > Centro de trabajo > Riesgo
+  function migrar(cat) {
+    if (!cat || !cat.centros) return cat;
+    cat.empresas = cat.empresas || [];
+    cat.centros = cat.centros.map(c => ('razon' in c) ? c : ({
+      razon: c.empresa || '', sucPrincipal: '', sucursal: '', centro: c.nombrePlanilla || c.interno || '', codigo: c.codigo || '',
+      operador: '', tipo: c.tipo || '', riesgo: c.riesgo || null, riesgoObservado: c.riesgoObservado || null, obs: c.obs || '',
+    }));
+    return cat;
+  }
   function guardarCat() {
     try { localStorage.setItem(LS_CAT, JSON.stringify({ catalogo: state.catalogo, info: state.catInfo })); } catch (e) { /* sin almacenamiento */ }
   }
   function cargarCatGuardado() {
     try {
       const raw = localStorage.getItem(LS_CAT);
-      if (raw) { const o = JSON.parse(raw); state.catalogo = o.catalogo; state.catInfo = o.info; }
+      if (raw) { const o = JSON.parse(raw); state.catalogo = migrar(o.catalogo); state.catInfo = o.info; }
     } catch (e) { /* sin almacenamiento */ }
   }
   function pintarCat() {
@@ -27,78 +37,155 @@
       return;
     }
     const c = state.catalogo, i = state.catInfo || {};
+    const empresas = new Set(c.centros.map(x => C.norm(x.razon)).filter(Boolean)).size;
     const sinRiesgo = c.centros.filter(x => !x.riesgo).length;
-    el.innerHTML = `<b>${esc(i.archivo || 'Catálogo')}</b> · ${c.empresas.length} empresas · ${c.centros.length} centros` +
+    el.innerHTML = `<b>${esc(i.archivo || 'Catálogo')}</b> · ${empresas} razones sociales · ${c.centros.length} centros` +
       (i.fecha ? ` · cargado ${esc(i.fecha)}` : '') + (i.editado ? ' · <span class="pill amarillo">editado en este equipo, falta subirlo a Teams</span>' : '') +
       (sinRiesgo ? `<div class="msg warn">${sinRiesgo} centros sin clase de riesgo confirmada: no se validan hasta completarlos.</div>` : '');
+  }
+  function usarCatalogo(cat, nombre) {
+    state.catalogo = migrar(cat);
+    state.catInfo = { archivo: nombre, fecha: new Date().toLocaleString('es-CO'), editado: false };
+    guardarCat(); pintarCat(); pintarEditor(); pintarLista();
   }
   async function leerCat(file) {
     try {
       const buf = await file.arrayBuffer();
       const cat = C.leerArchivo(XLSX, new Uint8Array(buf), file.name);
       if (cat.tipo !== 'catalogo') throw new Error('Este archivo no es el catálogo (debe tener la hoja "Centros de trabajo").');
-      state.catalogo = cat; state.catInfo = { archivo: file.name, fecha: new Date().toLocaleString('es-CO'), editado: false };
-      guardarCat(); pintarCat(); pintarEditor();
+      usarCatalogo(cat, file.name);
       mensaje('info', 'Catálogo cargado.');
     } catch (e) { mensaje('err', e.message); }
   }
 
-  // Editor de centros
+  // ---- Editor de centros
   const RIESGOS = ['', '1', '2', '3', '4', '5'];
+  const TIPOS = ['', 'Sede/Administración', 'Obra'];
+  const opt = (arr, v) => arr.map(o => `<option${o === String(v || '') ? ' selected' : ''}>${esc(o)}</option>`).join('');
   function pintarEditor() {
     const t = $('tblCat');
-    if (!state.catalogo) { t.innerHTML = '<tr><td class="empty">Cargue primero el catálogo.</td></tr>'; return; }
-    const emps = state.catalogo.empresas.map(e => e.empresa);
-    const opt = (arr, v) => arr.map(o => `<option${o === String(v || '') ? ' selected' : ''}>${esc(o)}</option>`).join('');
-    t.innerHTML = '<thead><tr><th>Empresa</th><th>Centro (nombre interno)</th><th>Nombre en planilla</th><th>Código</th><th>Tipo</th><th>Riesgo</th><th></th></tr></thead><tbody>' +
-      state.catalogo.centros.map((c, i) => `<tr data-i="${i}">
-        <td><select data-f="empresa"><option></option>${opt(emps, c.empresa)}</select></td>
-        <td><input type="text" data-f="interno" value="${esc(c.interno)}"></td>
-        <td><input type="text" data-f="nombrePlanilla" value="${esc(c.nombrePlanilla)}"></td>
-        <td><input type="text" data-f="codigo" value="${esc(c.codigo)}" style="width:70px"></td>
-        <td><select data-f="tipo">${opt(['', 'Sede/Administración', 'Obra'], c.tipo)}</select></td>
+    if (!state.catalogo) { t.innerHTML = '<tr><td class="empty">Cargue primero el catálogo o use "Extraer centros de las planillas".</td></tr>'; return; }
+    const orden = state.catalogo.centros.map((c, i) => [c, i])
+      .sort((a, b) => C.norm(a[0].razon).localeCompare(C.norm(b[0].razon)) || C.norm(a[0].sucursal).localeCompare(C.norm(b[0].sucursal)));
+    t.innerHTML = '<thead><tr><th>Razón social</th><th>Sucursal principal</th><th>Sucursal</th><th>Centro de trabajo</th><th>Tipo</th><th>Riesgo</th><th></th></tr></thead><tbody>' +
+      orden.map(([c, i]) => `<tr data-i="${i}">
+        <td><input type="text" data-f="razon" value="${esc(c.razon)}"></td>
+        <td><input type="text" data-f="sucPrincipal" value="${esc(c.sucPrincipal)}"></td>
+        <td><input type="text" data-f="sucursal" value="${esc(c.sucursal)}"></td>
+        <td><input type="text" data-f="centro" value="${esc(c.centro)}"></td>
+        <td><select data-f="tipo">${opt(TIPOS, c.tipo)}</select></td>
         <td><select data-f="riesgo">${opt(RIESGOS, c.riesgo)}</select></td>
         <td><button class="x" data-del="${i}" title="Quitar">×</button></td></tr>`).join('') + '</tbody>';
   }
   $('tblCat').addEventListener('change', e => {
     const tr = e.target.closest('tr[data-i]'); if (!tr) return;
     const c = state.catalogo.centros[+tr.dataset.i], f = e.target.dataset.f;
-    c[f] = f === 'riesgo' ? (parseInt(e.target.value, 10) || null) : e.target.value;
-    marcarEditado();
+    c[f] = f === 'riesgo' ? (parseInt(e.target.value, 10) || null) : e.target.value.trim();
+    marcarEditado(); pintarDetectados();
   });
   $('tblCat').addEventListener('click', e => {
     const i = e.target.dataset.del; if (i === undefined) return;
     if (!confirm('¿Quitar este centro del catálogo?')) return;
-    state.catalogo.centros.splice(+i, 1); marcarEditado(); pintarEditor();
+    state.catalogo.centros.splice(+i, 1); marcarEditado(); pintarEditor(); pintarDetectados();
   });
   function marcarEditado() { state.catInfo = Object.assign({}, state.catInfo, { editado: true }); guardarCat(); pintarCat(); }
+  function asegurarCatalogo() {
+    if (!state.catalogo) {
+      state.catalogo = { tipo: 'catalogo', archivo: 'Catalogo_Centros_Trabajo.xlsx', empresas: [], centros: [], entidades: {} };
+      state.catInfo = { archivo: 'Catálogo nuevo (sin guardar)', fecha: new Date().toLocaleString('es-CO'), editado: true };
+    }
+  }
   $('btnAddCentro').onclick = () => {
-    if (!state.catalogo) return mensaje('warn', 'Cargue primero el catálogo.');
-    state.catalogo.centros.push({ empresa: '', interno: '', nombrePlanilla: '', codigo: '', tipo: '', propia: '', riesgo: null, riesgoObservado: null, obs: 'Agregado desde el aplicativo' });
+    asegurarCatalogo();
+    state.catalogo.centros.push({ razon: '', sucPrincipal: '', sucursal: '', centro: '', codigo: '', operador: '', tipo: '', riesgo: null, riesgoObservado: null, obs: 'Agregado desde el aplicativo' });
     marcarEditado(); pintarEditor();
-    const rows = $('tblCat').querySelectorAll('tbody tr'); rows[rows.length - 1].querySelector('select').focus();
+    const inp = $('tblCat').querySelector(`tr[data-i="${state.catalogo.centros.length - 1}"] input`); if (inp) inp.focus();
   };
-  $('btnCatEditar').onclick = () => { $('catEditor').classList.toggle('hidden'); pintarEditor(); };
+  $('btnCatEditar').onclick = () => { $('catEditor').classList.toggle('hidden'); pintarEditor(); pintarDetectados(); };
   $('btnCerrarCat').onclick = () => $('catEditor').classList.add('hidden');
   $('btnDescCat').onclick = descargarCatalogo;
+
+  // ---- Extraer centros de las planillas cargadas
+  function planillasCargadas() { return state.archivos.filter(a => a.data && a.data.tipo === 'planilla').map(a => a.data); }
+  $('btnExtraer').onclick = () => {
+    if (!planillasCargadas().length) return mensaje('warn', 'Primero cargue una o varias planillas en el paso 2.');
+    state.verDetectados = true;
+    $('catEditor').classList.remove('hidden'); pintarEditor(); pintarDetectados();
+    $('catEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const ESTADO = {
+    ok: ['ok', 'En catálogo'], 'sin riesgo': ['amarillo', 'En catálogo sin riesgo'], distinto: ['rojo', 'Riesgo distinto'], nuevo: ['amarillo', 'Nuevo'],
+  };
+  function filaEstructura(e, i, conAccion) {
+    const [cls, txt] = ESTADO[e.estado];
+    const accion = e.estado === 'nuevo'
+      ? `<td><select data-f="tipo">${opt(TIPOS, e.riesgoObservado === 1 ? 'Sede/Administración' : e.riesgoObservado ? 'Obra' : '')}</select></td>
+         <td><select data-f="riesgo">${opt(RIESGOS, e.riesgoObservado)}</select></td>
+         <td><button class="btn small primary" data-addest="${i}">Agregar</button></td>`
+      : `<td></td><td>${e.riesgoCatalogo ? 'Riesgo ' + e.riesgoCatalogo : '—'}</td><td></td>`;
+    return `<tr data-e="${i}"><td>${esc(e.razon)}</td><td>${esc(e.sucPrincipal)}</td><td>${esc(e.sucursal)}</td><td><b>${esc(e.centro)}</b></td>
+      <td>${e.clasesObservadas.length ? e.clasesObservadas.map(x => 'Riesgo ' + x).join(' / ') : '—'}</td><td class="num">${e.trabajadores}</td>
+      <td><span class="pill ${cls}">${txt}</span></td>${conAccion ? accion : ''}</tr>`;
+  }
+  const CAB_EST = '<thead><tr><th>Razón social</th><th>Sucursal principal</th><th>Sucursal</th><th>Centro de trabajo</th><th>Riesgo en planilla</th><th class="num">Trab.</th><th>Estado</th><th>Tipo</th><th>Riesgo a confirmar</th><th></th></tr></thead>';
+  function pintarDetectados() {
+    const box = $('detectados');
+    if (!state.verDetectados) { box.classList.add('hidden'); return; }
+    const pl = planillasCargadas();
+    state.estructura = C.extraerEstructura(pl, state.catalogo);
+    const nuevos = state.estructura.filter(e => e.estado === 'nuevo').length;
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="res-head" style="margin-bottom:8px"><div><h2 style="font-size:15px;margin:0">Centros encontrados en las planillas (${state.estructura.length})</h2>
+      <p class="hint" style="margin:4px 0 0">Leídos de ${pl.length} planilla(s). Para cada centro <b>Nuevo</b>, confirme tipo y riesgo y pulse <b>Agregar</b>. Lo que queda en el catálogo es lo que usted define.</p></div>
+      <div class="row">${nuevos ? `<button class="btn small" id="btnAddTodos">Agregar los ${nuevos} nuevos</button>` : ''}<button class="btn small" id="btnOcultarDet">Ocultar</button></div></div>
+      <div class="tbl-wrap"><table>${CAB_EST}<tbody>${state.estructura.map((e, i) => filaEstructura(e, i, true)).join('')}</tbody></table></div>`;
+    const t = $('btnAddTodos');
+    if (t) t.onclick = () => {
+      box.querySelectorAll('tr[data-e]').forEach(tr => { const b = tr.querySelector('[data-addest]'); if (b) agregarDesdeFila(tr, state.estructura[+tr.dataset.e], true); });
+      terminarAgregado();
+    };
+    $('btnOcultarDet').onclick = () => { state.verDetectados = false; pintarDetectados(); };
+  }
+  function agregarDesdeFila(tr, e, silencioso) {
+    const v = f => tr.querySelector(`[data-f="${f}"]`).value;
+    const riesgo = parseInt(v('riesgo'), 10) || null;
+    if (!riesgo && !silencioso) { mensaje('warn', 'Seleccione la clase de riesgo del centro.'); return false; }
+    asegurarCatalogo();
+    state.catalogo.centros.push({
+      razon: e.razon, sucPrincipal: e.sucPrincipal, sucursal: e.sucursal, centro: e.centro, codigo: e.codigo, operador: e.operador,
+      tipo: v('tipo'), riesgo, riesgoObservado: e.riesgoObservado, obs: `Extraído de planilla ${e.planillas.join(', ')} el ${new Date().toLocaleDateString('es-CO')}`,
+    });
+    return true;
+  }
+  function terminarAgregado() {
+    marcarEditado(); pintarEditor(); pintarDetectados();
+    if (state.res) { state.res.centrosNuevos = C.extraerEstructura(planillasCargadas(), state.catalogo).filter(e => e.estado === 'nuevo'); pintarResultado(); }
+    mensaje('info', 'Centro(s) agregado(s). Pulse "Descargar catálogo" y reemplace el archivo en la carpeta Catalogo de Teams.');
+  }
+  $('catEditor').addEventListener('click', e => {
+    const i = e.target.dataset.addest; if (i === undefined) return;
+    if (agregarDesdeFila(e.target.closest('tr'), state.estructura[+i], false)) terminarAgregado();
+  });
+
   function descargarCatalogo() {
     if (!state.catalogo) return;
     const c = state.catalogo, wb = XLSX.utils.book_new();
     const tarifas = [0.00522, 0.01044, 0.02436, 0.0435, 0.0696];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['CATÁLOGO DE EMPRESAS Y CENTROS DE TRABAJO – Conciliación de aportes'],
+      ['CATÁLOGO DE CENTROS DE TRABAJO – Conciliación de aportes'],
       ['Generado desde el aplicativo el ' + new Date().toLocaleString('es-CO')],
-      ['Para cambiar un riesgo o agregar un centro: edite la hoja "Centros de trabajo" (aquí o en el aplicativo) y guarde el archivo en la carpeta Catalogo de Teams.'],
+      ['Estructura: Razón social > Sucursal principal > Sucursal > Centro de trabajo > Clase de riesgo.'],
+      ['Escriba los nombres tal como aparecen en la planilla del operador. "TODOS" o "n/a" sirve para cualquier sucursal o centro.'],
       ['Riesgo 1 = 0,522% · 2 = 1,044% · 3 = 2,436% · 4 = 4,350% · 5 = 6,960%'],
     ]), 'Instrucciones');
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Empresa', 'NIT', 'Software contable', 'Operador PILA'],
-      ...c.empresas.map(e => [e.empresa, e.nit, e.software, e.operador])]), 'Empresas');
-    const ws = XLSX.utils.aoa_to_sheet([['Empresa', 'Centro de trabajo (nombre interno)', 'Nombre en planilla (tal cual el operador)', 'Código centro en planilla', 'Tipo', 'Planilla propia', 'Tarifa ARL observada', 'Riesgo observado en archivos', 'Clase de riesgo CONFIRMADA (1-5)', 'Tarifa ARL esperada', 'Observaciones'],
-      ...c.centros.map(x => [x.empresa, x.interno, x.nombrePlanilla, x.codigo, x.tipo, x.propia, '', x.riesgoObservado || '', x.riesgo || '', x.riesgo ? tarifas[x.riesgo - 1] : '', x.obs || ''])]);
-    ws['!cols'] = [44, 24, 28, 12, 20, 12, 12, 12, 14, 12, 50].map(w => ({ wch: w }));
+    const filas = [...c.centros].sort((a, b) => C.norm(a.razon).localeCompare(C.norm(b.razon)) || C.norm(a.sucursal).localeCompare(C.norm(b.sucursal)));
+    const ws = XLSX.utils.aoa_to_sheet([['Razon Social', 'Sucursal Principal', 'SUCURSAL', 'CENTRO DE TRABAJO', 'Operador', 'Tipo', 'Riesgo en planilla', 'Clase de riesgo CONFIRMADA (1-5)', 'Tarifa ARL esperada', 'Observaciones'],
+      ...filas.map(x => [x.razon, x.sucPrincipal, x.sucursal, x.centro, x.operador || '', x.tipo, x.riesgoObservado || '', x.riesgo || '', x.riesgo ? tarifas[x.riesgo - 1] : '', x.obs || ''])]);
+    ws['!cols'] = [40, 34, 34, 26, 16, 20, 12, 14, 12, 45].map(w => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb, ws, 'Centros de trabajo');
+    if (c.empresas && c.empresas.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Empresa', 'NIT', 'Software contable', 'Operador PILA'], ...c.empresas.map(e => [e.empresa, e.nit, e.software, e.operador])]), 'Empresas');
     const ents = Object.entries(c.entidades || {});
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Código PILA', 'NIT', 'Nombre'], ...ents.map(([k, v]) => [k, v[0], v[1]])]), 'Entidades');
+    if (ents.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Código PILA', 'NIT', 'Nombre'], ...ents.map(([k, v]) => [k, v[0], v[1]])]), 'Entidades');
     XLSX.writeFile(wb, 'Catalogo_Centros_Trabajo.xlsx');
     state.catInfo = Object.assign({}, state.catInfo, { editado: false }); guardarCat(); pintarCat();
     mensaje('info', 'Catálogo descargado. Reemplace el archivo en la carpeta Catalogo de Teams para que todos usen esta versión.');
@@ -121,10 +208,7 @@
       try {
         const buf = await f.arrayBuffer();
         const d = C.leerArchivo(XLSX, new Uint8Array(buf), f.name);
-        if (d.tipo === 'catalogo') {
-          state.catalogo = d; state.catInfo = { archivo: f.name, fecha: new Date().toLocaleString('es-CO'), editado: false };
-          guardarCat(); pintarCat(); pintarEditor(); continue;
-        }
+        if (d.tipo === 'catalogo') { usarCatalogo(d, f.name); continue; }
         item.data = d;
       } catch (e) { item.error = e.message; }
       state.archivos = state.archivos.filter(a => a.name !== f.name);
@@ -145,6 +229,8 @@
     }).join('');
     const ok = state.archivos.filter(a => a.data);
     $('btnRun').disabled = !(ok.some(a => a.data.tipo === 'planilla') && ok.some(a => a.data.tipo !== 'planilla'));
+    $('btnExtraer').disabled = !ok.some(a => a.data.tipo === 'planilla');
+    if (state.verDetectados) pintarDetectados();
   }
   $('lista').addEventListener('click', e => {
     const i = e.target.dataset.rm; if (i === undefined) return;
@@ -207,31 +293,18 @@
           Object.keys(SUBS).map(k => `<td class="num">${money(t.nomina[k] || 0)}<br>${money(t.planilla[k] || 0)}</td>`).join('') + `<td>${esc(t.novedades.join(', '))}</td></tr>`).join('') +
         '</tbody></table></div>';
     } else if (state.tab === 'cen') {
-      p.innerHTML = `<p class="hint">Estos centros aparecen en la planilla pero no en el catálogo. Defina su tipo y riesgo y agréguelos; luego descargue el catálogo y súbalo a Teams.</p>
-      <div class="tbl-wrap"><table><thead><tr><th>Nombre en planilla</th><th>Código</th><th>Riesgo que liquida la planilla</th><th class="num">Trabajadores</th><th>Nombre interno</th><th>Tipo</th><th>Riesgo</th><th></th></tr></thead><tbody>` +
-        r.centrosNuevos.map((c, i) => `<tr data-c="${i}"><td>${esc(c.nombrePlanilla)}</td><td>${esc(c.codigo)}</td><td>${c.riesgoObservado ? 'Riesgo ' + c.riesgoObservado : '—'}</td><td class="num">${c.trabajadores}</td>
-          <td><input type="text" data-f="interno" placeholder="Ej. Obra X"></td>
-          <td><select data-f="tipo"><option></option><option>Sede/Administración</option><option>Obra</option></select></td>
-          <td><select data-f="riesgo">${RIESGOS.map(x => `<option${String(c.riesgoObservado || '') === x ? ' selected' : ''}>${x}</option>`).join('')}</select></td>
-          <td><button class="btn small primary" data-add="${i}">Agregar al catálogo</button></td></tr>`).join('') + '</tbody></table></div>';
+      p.innerHTML = `<p class="hint">Estos centros aparecen en la planilla pero no en el catálogo. Confirme tipo y riesgo y pulse <b>Agregar</b>; luego descargue el catálogo (paso 1 → Ver / editar centros) y súbalo a Teams.</p>
+      <div class="tbl-wrap"><table>${CAB_EST}<tbody>${r.centrosNuevos.map((e, i) => filaEstructura(e, i, true).replace('data-addest=', 'data-addres=')).join('')}</tbody></table></div>`;
     }
     const f = $('filtro');
     if (f) { f.value = state.filtro; f.oninput = () => { state.filtro = f.value; const pos = f.selectionStart; pintarPanel(); const n = $('filtro'); n.focus(); n.setSelectionRange(pos, pos); }; }
   }
   $('panel').addEventListener('click', e => {
-    const i = e.target.dataset.add; if (i === undefined) return;
-    if (!state.catalogo) return mensaje('warn', 'Cargue primero el catálogo para poder agregar centros.');
-    const tr = e.target.closest('tr'), c = state.res.centrosNuevos[+i];
-    const val = f => tr.querySelector(`[data-f="${f}"]`).value;
-    const riesgo = parseInt(val('riesgo'), 10) || null;
-    if (!riesgo) return mensaje('warn', 'Seleccione la clase de riesgo del centro.');
-    const emp = state.catalogo.empresas.find(x => x.nit === state.res.nitEmpresa);
-    state.catalogo.centros.push({ empresa: emp ? emp.empresa : c.empresa, interno: val('interno'), nombrePlanilla: c.nombrePlanilla, codigo: c.codigo, tipo: val('tipo'), propia: '', riesgo, riesgoObservado: c.riesgoObservado, obs: 'Agregado desde el aplicativo ' + new Date().toLocaleDateString('es-CO') });
-    marcarEditado(); pintarEditor();
-    state.res.centrosNuevos.splice(+i, 1);
-    if (!state.res.centrosNuevos.length) state.tab = 'dif';
-    pintarResultado();
-    mensaje('info', 'Centro agregado. Descargue el catálogo (paso 1 → Ver / editar centros) y reemplácelo en Teams.');
+    const i = e.target.dataset.addres; if (i === undefined) return;
+    if (agregarDesdeFila(e.target.closest('tr'), state.res.centrosNuevos[+i], false)) {
+      terminarAgregado();
+      if (!state.res.centrosNuevos.length) { state.tab = 'dif'; pintarResultado(); }
+    }
   });
 
   function barraFiltro() {

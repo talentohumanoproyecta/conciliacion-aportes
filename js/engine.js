@@ -247,12 +247,13 @@
   // ---------- Planilla Aportes en Línea (detalle "Planilla Resumen")
   function leerAportesEnLinea(sheets, archivo) {
     const rows = sheets[0].rows;
-    let empresa = '', nit = '', periodo = '', numero = '', pagada = '';
+    let empresa = '', nit = '', periodo = '', numero = '', pagada = '', sucursalPrincipal = '';
     const iA = findRow(rows, r => r.includes('RAZON SOCIAL'), 30);
     if (iA >= 0) {
       const H = rows[iA].map(norm), V = rows[iA + 1] || [];
       empresa = txt(V[colOf(H, 'Razon Social')]);
       nit = ced(V[colOf(H, 'Identificación')]);
+      sucursalPrincipal = txt(V[colOf(H, 'Sucursal Principal')]);
     }
     const iP = findRow(rows, (r, raw) => raw.some(v => /^\d{4}-\d{2}$/.test(txt(v))), 40);
     if (iP >= 0) {
@@ -315,7 +316,7 @@
         if (cod && nitE) entidades[cod] = [nitE, txt(r[cr])];
       }
     }
-    return { tipo: 'planilla', fuente: 'Aportes en Línea', archivo, empresa, nitEmpresa: nit, periodo, numero, pagada, lineas, entidades, correccion: false };
+    return { tipo: 'planilla', fuente: 'Aportes en Línea', archivo, empresa, nitEmpresa: nit, sucursalPrincipal, periodo, numero, pagada, lineas, entidades, correccion: false };
   }
 
   // ---------- Planilla Mi Planilla (reporte "ConEncabezado")
@@ -358,7 +359,7 @@
       lineas.push({
         cedula: doc, tipoDoc: txt(r[c.td]),
         nombre: [r[c.a1], r[c.a2], r[c.n1], r[c.n2]].map(txt).filter(Boolean).join(' '),
-        centro: txt(r[c.arl.centro]), centroNombre: '', nov: novCols.filter(([, j]) => txt(r[j])).map(([n]) => n),
+        centro: txt(r[c.arl.centro]), centroNombre: '', sucursal: txt(kv['NOMBRE SUCURSAL']), nov: novCols.filter(([, j]) => txt(r[j])).map(([n]) => n),
         sub, planilla: numero, corr: norm(r[c.corr]),
       });
     }
@@ -366,6 +367,7 @@
     if (lineas.some(l => l.corr === 'C')) { correccion = true; lineas = lineas.filter(l => l.corr !== 'A'); }
     return {
       tipo: 'planilla', fuente: 'Mi Planilla', archivo, empresa: txt(kv['EMPRESA']), nitEmpresa: ced(kv['NIT']),
+      sucursalPrincipal: txt(kv['NOMBRE SUCURSAL']),
       periodo: txt(kv['PERIODO DE PAGO']), numero, pagada: norm(kv['ESTADO']) === 'PAGADA' ? 'Sí' : '',
       tipoPlanilla: txt(kv['TIPO PLANILLA']), lineas, entidades: {}, correccion,
     };
@@ -385,15 +387,31 @@
     if (sc) {
       const H = (sc.rows[0] || []).map(norm);
       const col = l => colStarts(H, l);
-      const cE = colOf(H, 'Empresa'), cI = col('CENTRO DE TRABAJO'), cP = col('NOMBRE EN PLANILLA'), cC = col('CODIGO CENTRO'),
-        cT = colOf(H, 'Tipo'), cF = col('PLANILLA PROPIA'), cR = col('CLASE DE RIESGO CONFIRMADA'), cO = col('RIESGO OBSERVADO'), cOb = col('OBSERVACIONES');
-      sc.rows.slice(1).forEach(r => {
-        if (!r || !(txt(r[cE]) || txt(r[cI]) || txt(r[cP]))) return;
-        centros.push({
-          empresa: txt(r[cE]), interno: txt(r[cI]), nombrePlanilla: txt(r[cP]), codigo: txt(r[cC]),
-          tipo: txt(r[cT]), propia: txt(r[cF]), riesgo: num(r[cR]) || null, riesgoObservado: num(r[cO]) || null, obs: cOb >= 0 ? txt(r[cOb]) : '',
+      const val = (r, c) => (c >= 0 ? txt(r[c]) : '');
+      if (H.includes('RAZON SOCIAL')) {
+        // Estructura nueva: Razón social > Sucursal principal > Sucursal > Centro de trabajo
+        const cR = colOf(H, 'Razon Social'), cSP = colOf(H, 'Sucursal Principal'), cS = colOf(H, 'SUCURSAL'),
+          cC = colOf(H, 'CENTRO DE TRABAJO'), cCod = col('CODIGO CENTRO'), cOp = col('OPERADOR') >= 0 ? col('OPERADOR') : col('NOMBRE EN PLANILLA'),
+          cT = colOf(H, 'Tipo'), cRi = col('CLASE DE RIESGO CONFIRMADA'), cRo = col('RIESGO EN PLANILLA'), cOb = col('OBSERVACIONES');
+        sc.rows.slice(1).forEach(r => {
+          if (!r || !(val(r, cR) || val(r, cS) || val(r, cC))) return;
+          centros.push({
+            razon: val(r, cR), sucPrincipal: val(r, cSP), sucursal: val(r, cS), centro: val(r, cC), codigo: val(r, cCod),
+            operador: val(r, cOp), tipo: val(r, cT), riesgo: num(r[cRi]) || null, riesgoObservado: cRo >= 0 ? (num(r[cRo]) || null) : null, obs: val(r, cOb),
+          });
         });
-      });
+      } else {
+        // Estructura anterior (Empresa / Nombre en planilla / Código)
+        const cE = colOf(H, 'Empresa'), cI = col('CENTRO DE TRABAJO'), cP = col('NOMBRE EN PLANILLA'), cC = col('CODIGO CENTRO'),
+          cT = colOf(H, 'Tipo'), cR = col('CLASE DE RIESGO CONFIRMADA'), cO = col('RIESGO OBSERVADO'), cOb = col('OBSERVACIONES');
+        sc.rows.slice(1).forEach(r => {
+          if (!r || !(val(r, cE) || val(r, cI) || val(r, cP))) return;
+          centros.push({
+            razon: val(r, cE), sucPrincipal: '', sucursal: '', centro: val(r, cP) || val(r, cI), codigo: val(r, cC), operador: '',
+            tipo: val(r, cT), riesgo: num(r[cR]) || null, riesgoObservado: num(r[cO]) || null, obs: val(r, cOb),
+          });
+        });
+      }
     }
     const sn = get('ENTIDADES');
     if (sn) {
@@ -402,6 +420,60 @@
       sn.rows.slice(1).forEach(r => { if (r && txt(r[cc]) && ced(r[cn])) entidades[txt(r[cc])] = [ced(r[cn]), txt(r[cm])]; });
     }
     return { tipo: 'catalogo', archivo, empresas, centros, entidades };
+  }
+
+  // ------------------------------------------------------------------ estructura de centros
+  const COMODIN = new Set(['', 'TODOS', 'TODAS', 'N A', 'NA', 'NO APLICA']);
+  const esComodin = v => COMODIN.has(norm(v));
+  const igual = (a, b) => norm(a) !== '' && norm(a) === norm(b);
+
+  /** Busca en el catálogo el centro de una línea de planilla (razón social > sucursal > centro). */
+  function buscarCentro(centros, l) {
+    let mejor = null, puntos = -1;
+    for (const c of centros) {
+      const okRazon = esComodin(c.razon) || igual(c.razon, l.empresa) || igual(c.razon, l.sucPrincipal) || igual(c.sucPrincipal, l.empresa);
+      if (!okRazon) continue;
+      const okSuc = esComodin(c.sucursal) || igual(c.sucursal, l.sucursal || l.sucPrincipal);
+      if (!okSuc) continue;
+      const okCentro = esComodin(c.centro) || igual(c.centro, l.centroNombre) ||
+        (!l.centroNombre && igual(c.centro, l.centro)) ||
+        (c.codigo && l.centro && txt(c.codigo) === txt(l.centro));
+      if (!okCentro) continue;
+      const p = (esComodin(c.razon) ? 0 : 1) + (esComodin(c.sucursal) ? 0 : 1) + (esComodin(c.centro) ? 0 : 2);
+      if (p > puntos) { mejor = c; puntos = p; }
+    }
+    return mejor;
+  }
+
+  /** Extrae de las planillas la estructura Razón social > Sucursal > Centro con el riesgo que liquidan. */
+  function extraerEstructura(planillas, catalogo) {
+    const m = new Map();
+    for (const p of planillas) {
+      for (const l of p.lineas) {
+        const li = Object.assign({ empresa: p.empresa, sucPrincipal: p.sucursalPrincipal || '' }, l);
+        const centro = l.centroNombre || l.centro || '';
+        const key = [p.empresa, l.sucursal, centro].map(norm).join('|');
+        const e = m.get(key) || {
+          razon: p.empresa, nit: p.nitEmpresa, sucPrincipal: p.sucursalPrincipal || '', sucursal: l.sucursal || '',
+          centro, codigo: l.centroNombre ? '' : (l.centro || ''), operador: p.fuente, clases: {}, trabajadores: new Set(), planillas: new Set(), muestra: li,
+        };
+        const t = l.sub.arl ? l.sub.arl.tarifa : 0, cl = claseDe(t);
+        if (cl) e.clases[cl] = (e.clases[cl] || 0) + 1;
+        e.trabajadores.add(l.cedula); e.planillas.add(p.numero);
+        m.set(key, e);
+      }
+    }
+    return [...m.values()].map(e => {
+      const clases = Object.keys(e.clases).map(Number).sort((a, b) => e.clases[b] - e.clases[a]);
+      const enCat = catalogo ? buscarCentro(catalogo.centros, e.muestra) : null;
+      let estado = 'nuevo';
+      if (enCat) estado = !enCat.riesgo ? 'sin riesgo' : (clases.length && !clases.includes(enCat.riesgo) ? 'distinto' : 'ok');
+      return {
+        razon: e.razon, nit: e.nit, sucPrincipal: e.sucPrincipal, sucursal: e.sucursal, centro: e.centro, codigo: e.codigo, operador: e.operador,
+        riesgoObservado: clases[0] || null, clasesObservadas: clases, trabajadores: e.trabajadores.size, planillas: [...e.planillas],
+        estado, riesgoCatalogo: enCat ? enCat.riesgo : null,
+      };
+    });
   }
 
   // ------------------------------------------------------------------ conciliación
@@ -430,16 +502,15 @@
     // Empresa
     const nitEmpresa = planillas[0].nitEmpresa || (nominas[0] || {}).nitEmpresa || (planos[0] || {}).nitEmpresa;
     if (planillas.some(p => p.nitEmpresa && p.nitEmpresa !== nitEmpresa)) avisos.push('Las planillas cargadas son de empresas (NIT) distintas.');
-    const empCat = catalogo ? catalogo.empresas.find(e => e.nit && e.nit === nitEmpresa) : null;
+    const empCat = catalogo ? (catalogo.empresas || []).find(e => e.nit && e.nit === nitEmpresa) : null;
     const empresaNombre = (empCat && empCat.empresa) || planillas[0].empresa || (nominas[0] || {}).empresa || '';
-    if (catalogo && !empCat) avisos.push(`La empresa NIT ${nitEmpresa} no está en la hoja "Empresas" del catálogo.`);
     planillas.forEach(p => { if (p.pagada === 'Sí') avisos.push(`La planilla ${p.numero} (${p.archivo}) ya figura como PAGADA: la revisión ideal es antes de pagar.`); });
     planillas.forEach(p => { if (p.correccion) avisos.push(`La planilla ${p.numero} es de corrección (tipo ${p.tipoPlanilla || 'N'}): se toman solo las líneas corregidas (C).`); });
 
     // ---- Planilla por trabajador
     const P = new Map();
     const lineasPlanilla = [];
-    planillas.forEach(p => p.lineas.forEach(l => { l.planilla = l.planilla || p.numero; l.fuente = p.fuente; lineasPlanilla.push(l); }));
+    planillas.forEach(p => p.lineas.forEach(l => { l.planilla = l.planilla || p.numero; l.fuente = p.fuente; l.empresa = p.empresa; l.sucPrincipal = p.sucursalPrincipal || ''; lineasPlanilla.push(l); }));
     for (const l of lineasPlanilla) {
       let w = P.get(l.cedula);
       if (!w) { w = { cedula: l.cedula, nombre: l.nombre, lineas: [], centros: new Set(), planillas: new Set(), nov: new Set(), sub: {} }; P.set(l.cedula, w); }
@@ -460,31 +531,27 @@
       }
     }
 
-    // ---- Validación de centros contra catálogo
-    const centrosNuevos = new Map();
+    // ---- Validación de centros contra catálogo (Razón social > Sucursal > Centro de trabajo)
     const hallCentro = new Map(); // cedula -> findings
-    const centrosCat = catalogo ? catalogo.centros.filter(c => !empCat || !c.empresa || norm(c.empresa) === norm(empCat.empresa)) : [];
-    function buscarCentro(l) {
-      const nombreN = norm(l.centroNombre), cod = txt(l.centro);
-      return centrosCat.find(c => (nombreN && norm(c.nombrePlanilla) === nombreN) || (cod && c.codigo !== '' && txt(c.codigo) === cod && !nombreN));
-    }
+    let centrosNuevos = [];
     if (catalogo) {
+      const estructura = extraerEstructura(planillas, catalogo);
+      centrosNuevos = estructura.filter(e => e.estado === 'nuevo');
+      const sinRiesgo = estructura.filter(e => e.estado === 'sin riesgo');
+      if (sinRiesgo.length) avisos.push(`${sinRiesgo.length} centro(s) están en el catálogo sin clase de riesgo confirmada: ${sinRiesgo.map(e => e.centro).join(', ')}.`);
+      if (!estructura.some(e => e.estado !== 'nuevo')) avisos.push(`"${empresaNombre}" no tiene centros en el catálogo (o la razón social escrita en el catálogo no es igual a la de la planilla). Agréguelos en la pestaña "Centros nuevos" o con "Extraer centros de las planillas".`);
       for (const l of lineasPlanilla) {
-        const key = l.centroNombre || l.centro; if (!key) continue;
-        const c = buscarCentro(l);
+        const c = buscarCentro(catalogo.centros, l);
+        if (!c || !c.riesgo) continue;
         const tarifa = l.sub.arl ? l.sub.arl.tarifa : 0;
         const clase = claseDe(tarifa);
-        if (!c) {
-          const k = norm(key);
-          const cn = centrosNuevos.get(k) || { empresa: empresaNombre, nombrePlanilla: l.centroNombre, codigo: l.centroNombre ? '' : l.centro, riesgoObservado: clase, tarifa, trabajadores: new Set() };
-          cn.trabajadores.add(l.cedula); if (clase) cn.riesgoObservado = clase;
-          centrosNuevos.set(k, cn);
-        } else if (c.riesgo && tarifa && clase && clase !== c.riesgo) {
+        if (tarifa && clase && clase !== c.riesgo) {
           const arr = hallCentro.get(l.cedula) || [];
+          const lugar = [l.sucursal && 'sucursal "' + l.sucursal + '"', 'centro "' + (l.centroNombre || l.centro) + '"'].filter(Boolean).join(', ');
           arr.push({
             sev: 'rojo', sub: 'arl', tipo: 'Riesgo distinto al catálogo',
-            detalle: `El centro "${key}" es riesgo ${c.riesgo} en el catálogo, pero la planilla ${l.planilla} liquida riesgo ${clase} (${pct(tarifa)}).`,
-            resp: 'Talento Humano', accion: 'Corregir el centro de trabajo o la clase de riesgo del trabajador en el operador.',
+            detalle: `En el catálogo, ${lugar} es riesgo ${c.riesgo} (${pct(ARL_CLASES[c.riesgo - 1])}), pero la planilla ${l.planilla} liquida riesgo ${clase} (${pct(tarifa)}).`,
+            resp: 'Talento Humano', accion: 'Corregir el centro de trabajo o la clase de riesgo del trabajador en el operador (o el catálogo, si el riesgo cambió).',
           });
           hallCentro.set(l.cedula, arr);
         }
@@ -692,7 +759,7 @@
       periodo: planillas.map(p => p.periodo).filter(Boolean).join(', '),
       planillas: planillas.map(p => ({ numero: p.numero, fuente: p.fuente, archivo: p.archivo, periodo: p.periodo, lineas: p.lineas.length, pagada: p.pagada })),
       trabajadores, entidades, totales, avisos,
-      centrosNuevos: [...centrosNuevos.values()].map(c => Object.assign(c, { trabajadores: c.trabajadores.size })),
+      centrosNuevos,
       sinIdentificar: [...sinIdentificar],
       conteo: {
         total: trabajadores.length, rojo: trabajadores.filter(t => t.sev === 'rojo').length,
@@ -778,12 +845,12 @@
     ]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(all), 'Todos');
     if (r.centrosNuevos.length) {
-      const cn = [['Empresa', 'Nombre en planilla', 'Código centro', 'Riesgo observado', 'Trabajadores']];
-      r.centrosNuevos.forEach(c => cn.push([c.empresa, c.nombrePlanilla, c.codigo, c.riesgoObservado || '', c.trabajadores]));
+      const cn = [['Razón social', 'Sucursal', 'Centro de trabajo', 'Riesgo observado', 'Trabajadores']];
+      r.centrosNuevos.forEach(c => cn.push([c.razon, c.sucursal, c.centro, c.riesgoObservado || '', c.trabajadores]));
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cn), 'Centros nuevos');
     }
     return wb;
   }
 
-  return { leerArchivo, conciliar, informeLibro, SUBS, money, pct, norm, claseDe, ARL_CLASES };
+  return { leerArchivo, conciliar, extraerEstructura, buscarCentro, informeLibro, SUBS, money, pct, norm, claseDe, ARL_CLASES };
 });

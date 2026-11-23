@@ -42,7 +42,17 @@ Aplicativo web que cruza, **trabajador por trabajador**, la nómina contabilizad
 
 Hay una sola fuente oficial: `Catalogo/Catalogo_Centros_Trabajo.xlsx` en Teams.
 
-- **Desde el aplicativo:**
+**Estructura** (hoja "Centros de trabajo"): **Razón social → Sucursal principal → Sucursal → Centro de trabajo → Clase de riesgo**.
+- Los nombres se escriben tal como aparecen en la planilla del operador. No importan las mayúsculas ni las tildes.
+- En Sucursal o Centro se puede escribir **TODOS** o **n/a** para que la fila aplique a cualquier sucursal o centro de esa razón social.
+
+- **Extraer desde las planillas (recomendado):**
+  1. Carga una o varias planillas en el paso 2.
+  2. Pulsa **Extraer centros de las planillas**.
+  3. Revisa la lista: cada centro aparece como *En catálogo*, *Nuevo* o *Riesgo distinto*.
+  4. En los *Nuevos*, confirma el tipo y el riesgo y pulsa **Agregar**.
+  5. Pulsa **Descargar catálogo** y reemplaza el archivo en Teams.
+- **Desde el aplicativo, a mano:**
   1. Abre **Ver / editar centros**.
   2. Cambia el riesgo o pulsa **+ Agregar centro**.
   3. Pulsa **Descargar catálogo** y reemplaza el archivo en la carpeta `Catalogo` de Teams.
