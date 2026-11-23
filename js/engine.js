@@ -110,9 +110,10 @@
     if (sheets.some(s => norm(s.name) === 'CENTROS DE TRABAJO')) return leerCatalogo(sheets, nombre);
     if (head.includes('LIQUIDACION DETALLADA DE APORTES')) return leerAportesEnLinea(sheets, nombre);
     if (head.includes('NO DE IDENTIFICACION') && head.includes('CODIGO EPS')) return leerMiPlanilla(sheets, nombre);
+    if (head.includes('FONDO DE SALUD') && head.includes('APORTE SALUD EMPLEADO')) return leerSiigoSS(first, nombre);
     if (head.includes('CODIGO CONTABLE') && head.includes('DETALLE')) return leerSiigo(first, nombre);
     if (/(^|\|)TIPO\|/.test(head) && head.includes('EMPLEADO') && head.includes('CUENTA')) return leerMekano(first, nombre);
-    throw new Error('No reconozco este archivo. Formatos soportados: auxiliar Siigo, auxiliar Mekano, plano PILA (.txt), planilla Aportes en Línea, planilla Mi Planilla y catálogo.');
+    throw new Error('No reconozco este archivo. Formatos soportados: auxiliar Siigo, reporte Siigo de seguridad social por empleado, auxiliar Mekano, plano PILA (.txt), planilla Aportes en Línea, planilla Mi Planilla y catálogo.');
   }
 
   function decodeText(data) {
@@ -157,6 +158,49 @@
     return {
       tipo: 'nomina', fuente: 'Siigo', archivo, empresa, nitEmpresa: nitEmp, periodo: rango,
       registros, pagos, fechas: [...fechas], avisos: otrasCuentas.size ? ['Cuentas ignoradas: ' + [...otrasCuentas].join(', ')] : [],
+    };
+  }
+
+  // ---------- Reporte Siigo "Seguridad social y parafiscales por empleado"
+  function leerSiigoSS(rows, archivo) {
+    const h = findRow(rows, r => r.includes('FONDO DE SALUD') && r.includes('APORTE SALUD EMPLEADO'), 30);
+    const H = rows[h].map(norm);
+    const c = l => colOf(H, l);
+    const k = {
+      nom: c('Nombre'), id: c('Identificación'), con: c('No contrato'), fs: c('Fondo de salud'),
+      ibcS: c('IBC salud empleado'), sE: c('Aporte salud empleado'), sP: c('Aporte salud empresa'),
+      fp: c('Fondo de pensión'), ibcP: c('IBC pensión empleado'), pE: c('Aporte pensión empleado'), pP: c('Aporte pensión empresa'),
+      fsp: colStarts(H, 'FONDO DE SOLIDARIDAD'), fa: c('Fondo ARL'), ibcA: c('IBC ARL'), pctA: c('Porcentaje ARL'), arl: c('ARL Empresa'),
+      ibcC: c('IBC Parafiscales'), sena: c('SENA'), icbf: c('ICBF'), ccf: c('Caja de compensación'),
+    };
+    const empresa = txt((rows[1] || [])[0]);
+    const nominaTxt = txt((rows[2] || [])[0]).replace(/^N[oó]mina:\s*/i, '');
+    const periodo = txt((rows[3] || [])[0]).replace(/^Periodo:\s*/i, '');
+    const registros = [];
+    const push = (o) => { if (o.valor) registros.push(o); };
+    for (let i = h + 1; i < rows.length; i++) {
+      const r = rows[i]; if (!r) continue;
+      let nombre = txt(r[k.nom]), idTxt = txt(r[k.id]), con = txt(r[k.con]);
+      // Algunas filas vienen corridas: parte del nombre en "Identificación" y la cédula en "No contrato"
+      if (!/^\d{4,}$/.test(idTxt) && /^\d{4,}/.test(con)) {
+        if (idTxt && !/\d/.test(idTxt)) nombre = (nombre + ' ' + idTxt).trim();
+        idTxt = con.split('-')[0];
+      }
+      const cedula = ced(idTxt.split('-')[0]);
+      if (!cedula || !nombre) continue;
+      const base = { nombre, cedula, fecha: periodo, comprobante: nominaTxt };
+      push(Object.assign({}, base, { sub: 'sal', entNit: '', entNombre: txt(r[k.fs]), tipo: 'empleado', valor: num(r[k.sE]), ibc: num(r[k.ibcS]) }));
+      push(Object.assign({}, base, { sub: 'sal', entNit: '', entNombre: txt(r[k.fs]), tipo: 'patronal', valor: num(r[k.sP]) }));
+      push(Object.assign({}, base, { sub: 'pen', entNit: '', entNombre: txt(r[k.fp]), tipo: 'empleado', valor: num(r[k.pE]) + num(r[k.fsp]), ibc: num(r[k.ibcP]) }));
+      push(Object.assign({}, base, { sub: 'pen', entNit: '', entNombre: txt(r[k.fp]), tipo: 'patronal', valor: num(r[k.pP]) }));
+      push(Object.assign({}, base, { sub: 'arl', entNit: '', entNombre: txt(r[k.fa]), tipo: 'patronal', valor: num(r[k.arl]), ibc: num(r[k.ibcA]), tarifa: num(r[k.pctA]) / 100 }));
+      push(Object.assign({}, base, { sub: 'ccf', entNit: '', entNombre: '', tipo: 'patronal', valor: num(r[k.ccf]), ibc: num(r[k.ibcC]) }));
+      push(Object.assign({}, base, { sub: 'par', entNit: NIT_SENA, entNombre: 'SENA', tipo: 'patronal', valor: num(r[k.sena]) }));
+      push(Object.assign({}, base, { sub: 'par', entNit: NIT_ICBF, entNombre: 'ICBF', tipo: 'patronal', valor: num(r[k.icbf]) }));
+    }
+    return {
+      tipo: 'nomina', fuente: 'Siigo (reporte por empleado)', reporte: true, archivo, empresa, nitEmpresa: '',
+      periodo: nominaTxt + (periodo ? ' · ' + periodo : ''), registros, pagos: [], fechas: [periodo], avisos: [],
     };
   }
 
@@ -562,8 +606,13 @@
     let regs = [];
     let fuenteNomina = '';
     if (nominas.length) {
-      fuenteNomina = [...new Set(nominas.map(n => n.fuente))].join(' + ');
-      nominas.forEach(n => regs.push(...n.registros));
+      let usar = nominas;
+      if (nominas.some(n => n.reporte) && nominas.some(n => !n.reporte)) {
+        usar = nominas.filter(n => n.reporte);
+        avisos.push('Se cargó el reporte de seguridad social por empleado y también el auxiliar contable: se usa el reporte por empleado (trae cédula e IBC); el auxiliar no se suma para no duplicar.');
+      }
+      fuenteNomina = [...new Set(usar.map(n => n.fuente))].join(' + ') + (usar.length > 1 ? ` (${usar.length} archivos)` : '');
+      usar.forEach(n => regs.push(...n.registros));
     } else {
       fuenteNomina = 'Plano PILA (sin auxiliar)';
       avisos.push('No se cargó auxiliar contable: se usa el plano PILA como dato de nómina.');
@@ -574,6 +623,25 @@
         }
       }));
     }
+    // Entidades que llegan solo con nombre (reporte por empleado): se busca su NIT por nombre
+    const TIPO_COD = { sal: /^(EPS|ESS|EPSS|EPSC|ESSC|CCFC)/i, pen: /^(\d|25-)/, arl: /^14-/, ccf: /^CCF\d/i };
+    const cacheEnt = new Map();
+    function nitPorNombre(sub, nombre) {
+      const key = sub + '|' + norm(nombre);
+      if (cacheEnt.has(key)) return cacheEnt.get(key);
+      const w = entityWords(nombre);
+      let nit = '';
+      if (w.length) {
+        const cand = Object.entries(ent).filter(([cod, v]) => (!TIPO_COD[sub] || TIPO_COD[sub].test(cod)) && v[0]);
+        const hit = cand.find(([, v]) => { const we = entityWords(v[1]); return we.length && w.every(t => we.includes(t)); }) ||
+          cand.find(([, v]) => { const we = entityWords(v[1]); return we.length && we.every(t => w.includes(t)); });
+        if (hit) nit = hit[1][0];
+      }
+      cacheEnt.set(key, nit);
+      return nit;
+    }
+    regs.forEach(r => { if (!r.entNit && r.entNombre && r.sub !== 'par') r.entNit = nitPorNombre(r.sub, r.entNombre); });
+
     const ignoradosPar = regs.filter(r => r.sub === 'par');
     if (ignoradosPar.length) avisos.push(`${ignoradosPar.length} registros de SENA/ICBF no se comparan (aportante exonerado o no aplica).`);
     regs = regs.filter(r => r.sub !== 'par');
@@ -612,11 +680,28 @@
       let w = N.get(r.cedula);
       if (!w) { w = { cedula: r.cedula, nombre: r.nombre, sub: {} }; N.set(r.cedula, w); }
       if (r.nombre && r.nombre.length > (w.nombre || '').length) w.nombre = r.nombre;
-      const s = w.sub[r.sub] || (w.sub[r.sub] = { total: 0, byNit: {}, nombres: {}, empleado: 0, patronal: 0 });
+      const s = w.sub[r.sub] || (w.sub[r.sub] = { total: 0, byNit: {}, nombres: {}, empleado: 0, patronal: 0, ibc: 0, tarifa: 0 });
       s.total += r.valor;
+      if (r.ibc) s.ibc += r.ibc;
+      if (r.tarifa) s.tarifa = r.tarifa;
       s.byNit[r.entNit] = (s.byNit[r.entNit] || 0) + r.valor;
       s.nombres[r.entNit] = r.entNombre;
       if (r.tipo === 'empleado') s.empleado += r.valor; else if (r.tipo === 'patronal') s.patronal += r.valor;
+    }
+
+    for (const [id, w] of N) {
+      const p = P.get(id); if (!p) continue;
+      for (const k of Object.keys(w.sub)) {
+        const s = w.sub[k];
+        if (s.byNit[''] !== undefined && p.sub[k]) {
+          const nitsP = Object.keys(p.sub[k].byNit);
+          if (nitsP.length === 1) {
+            s.byNit[nitsP[0]] = (s.byNit[nitsP[0]] || 0) + s.byNit[''];
+            s.nombres[nitsP[0]] = s.nombres[nitsP[0]] || s.nombres[''] || '(según planilla)';
+            delete s.byNit['']; delete s.nombres[''];
+          }
+        }
+      }
     }
 
     // Plano por cédula (para avisos de código EPS)
@@ -642,8 +727,8 @@
       if (p && !n) {
         hall.push({
           sev: 'rojo', sub: '', tipo: 'No está en contabilidad',
-          detalle: `Aparece en la planilla ${[...p.planillas].join(', ')} por ${money(sumTotales(p))} pero no tiene registros en el auxiliar contable.`,
-          resp: 'Contabilidad', accion: 'Verificar que la nómina del trabajador esté contabilizada en el período.',
+          detalle: `Aparece en la planilla ${[...p.planillas].join(', ')} por ${money(sumTotales(p))} pero no tiene registros en los archivos de contabilidad o nómina cargados.`,
+          resp: 'Contabilidad', accion: 'Verificar que la nómina del trabajador esté liquidada y contabilizada en el período (puede estar en otra nómina, p. ej. liquidaciones).',
         });
       }
       // Entidad configurada como el mismo trabajador
@@ -664,13 +749,14 @@
           const vN = ns ? ns.total : 0, vP = ps ? ps.total : 0;
           // Comparación de entidad
           if (ns && ps && Object.keys(ps.byNit).length) {
-            const nitsN = Object.keys(ns.byNit).filter(x => Math.abs(ns.byNit[x]) >= 1 && x !== id);
+            const nitsN = Object.keys(ns.byNit).filter(x => x && Math.abs(ns.byNit[x]) >= 1 && x !== id);
+            const sinNit = Object.keys(ns.byNit).filter(x => !x).length;
             const nitsP = Object.keys(ps.byNit);
             const nomN = nitsN.map(x => ns.nombres[x] || x).join(', ');
             const nomP = nitsP.map(x => x.startsWith('COD:') ? (ps.nomEnt || x.slice(4)) : (nombreDe([...ps.cods].find(c => nitDe(c) === x)) || x)).join(', ');
             const codsP = [...ps.cods].join(', ');
             let distinto = false;
-            for (const x of nitsP) {
+            for (const x of (sinNit && !nitsN.length ? [] : nitsP)) {
               if (x.startsWith('COD:')) {
                 const wordsP = entityWords(ps.nomEnt || '');
                 const ok = wordsP.length && nitsN.some(y => entityWords(ns.nombres[y] || '').some(t => wordsP.includes(t)));
@@ -784,12 +870,15 @@
     if (k === 'arl') {
       const clP = [...ps.tarifas].map(claseDe).filter(Boolean);
       const ibc = ps.ibcTarifa || ps.ibc;
-      const clN = ibc ? claseDe(ns.total / ibc) : null;
+      const clN = ns.tarifa ? claseDe(ns.tarifa) : (ibc ? claseDe(ns.total / ibc) : null);
+      if (ns.ibc && Math.abs(ns.ibc - ps.ibc) > 1000) partes.push(`IBC de ARL: nómina ${money(ns.ibc)} vs planilla ${money(ps.ibc)}.`);
       if (clN && clP.length && !clP.includes(clN)) {
         partes.push(`Contabilidad liquida ARL como riesgo ${clN} (${pct(ARL_CLASES[clN - 1])}) y la planilla como riesgo ${clP.join('/')} (${[...ps.tarifas].map(pct).join('/')}).`);
       }
       const sinTarifa = p.lineas.filter(l => l.sub.arl && l.sub.arl.dias > 0 && !l.sub.arl.tarifa && !(l.nov.includes('IGE') || l.nov.includes('LMA') || l.nov.includes('SLN') || l.nov.includes('VAC')));
       if (sinTarifa.length) partes.push(`Hay ${sinTarifa.reduce((a, l) => a + l.sub.arl.dias, 0)} días con ARL en $0.`);
+    } else if (ns.ibc && ps.ibc) {
+      if (Math.abs(ns.ibc - ps.ibc) > 1000) partes.push(`IBC: nómina ${money(ns.ibc)} vs planilla ${money(ps.ibc)}.`);
     } else if (TARIFA_REF[k] && ps.ibc) {
       const tasa = ns.total / ps.ibc;
       const ibcN = ns.total / (ps.total / ps.ibc || TARIFA_REF[k]);
